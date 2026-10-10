@@ -1,8 +1,9 @@
-# RestMock
+# imockey
 
-[![.NET](https://github.com/phduarte/restmock/actions/workflows/dotnet.yml/badge.svg)](https://github.com/phduarte/restmock/actions/workflows/dotnet.yml)
+[![.NET](https://github.com/phduarte/imockey/actions/workflows/dotnet.yml/badge.svg)](https://github.com/phduarte/imockey/actions/workflows/dotnet.yml)
+[![Container](https://github.com/phduarte/imockey/actions/workflows/container.yml/badge.svg)](https://github.com/phduarte/imockey/actions/workflows/container.yml)
 
-An HTTP server for creating mocked endpoints. Useful for integration tests, stress tests, chaos simulation, debugging, and decoupled development.
+A multi-user HTTP server for creating mocked endpoints. Useful for integration tests, stress tests, chaos simulation, debugging, and decoupled development.
 
 > Also available in [Português (pt-BR)](README.pt-BR.md).
 
@@ -12,46 +13,54 @@ An HTTP server for creating mocked endpoints. Useful for integration tests, stre
 - [Quick Start](#quick-start)
 - [Accounts and Sign-in](#accounts-and-sign-in)
 - [Applications](#applications)
-- [Mock Manager](#mock-manager)
-- [Calling a Mock](#calling-a-mock)
+- [Route Manager](#route-manager)
+- [Calling a Route](#calling-a-route)
 - [Pattern Matching Rules](#pattern-matching-rules)
 - [Response Body Variables](#response-body-variables)
 - [Use Cases](#use-cases)
 - [Reserved Routes](#reserved-routes)
 - [Persistence](#persistence)
+- [Deployment](#deployment)
+- [Development](#development)
+- [Market Analysis](#market-analysis)
 - [Technologies](#technologies)
 
 ---
 
 ## Concepts
 
-**User** — Someone who signs in to RestMock. Each user only sees and manages their own applications.
+**User** — Someone who signs in to imockey. Each user only sees and manages their own applications.
 
-**Application** — A group of mocks that simulates one real API. A user can have any number of applications. Each one has a **slug**, unique across all users, that becomes the first segment of its mocks' URLs.
+**Application** — A group of routes that simulates one real API. A user can have any number of applications. Each one has a **slug** that, prefixed with the owner's username (`{username}-{slug}`, e.g. `alice-store`), becomes the first segment of its routes' URLs.
 
-**Mock** — A non-functional copy of a real endpoint. Returns configured responses without any business logic. Every mock belongs to one application.
+**Route** — A non-functional copy of a real endpoint. Returns configured responses without any business logic. Every route belongs to one application.
 
-**Pattern** — The address of the mocked endpoint inside its application (without host or slug). It may contain wildcards and validation types.
+**Pattern** — The address of the mocked endpoint inside its application (without host, username or slug). It may contain wildcards and validation types.
 
 **Processing time** — An artificial delay applied before responding, useful for simulating latency or timeout.
+
+Routes are managed only through the web UI; there is no management REST API.
 
 ---
 
 ## Quick Start
 
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+
 ```bash
 # clone and run
-git clone https://github.com/phduarte/restmock
-cd restmock
-run.bat
+git clone https://github.com/phduarte/imockey
+cd imockey
+run.bat                          # Windows
+dotnet run --project Imockey    # any platform
 ```
 
-`run.bat` starts the server and automatically opens the browser at `http://localhost:5087`.
+`run.bat` frees ports 5087 and 7253 if they are in use, starts the server and opens the browser at `http://localhost:5087`.
 
-1. Create an account at `/account/register` (or sign in with GitHub, if configured).
-2. Create an application, for example **Store API** with slug `store`.
-3. Open it and create a mock, for example `GET /v1/products`.
-4. Call it: `curl http://localhost:5087/store/v1/products`.
+1. Create an account at `/account/register`, for example with username `alice` (or sign in with GitHub, if configured).
+2. Create an application, for example **Store API** with slug `store`. Its routes will live under `/alice-store`.
+3. In the application's Route Manager, create a route, for example `GET /v1/products`.
+4. Call it: `curl http://localhost:5087/alice-store/v1/products`.
 
 ---
 
@@ -60,15 +69,17 @@ run.bat
 | Address | Description |
 | --- | --- |
 | `/account/login` | Sign in with username and password, or with GitHub |
-| `/account/register` | Create an account with username and password |
+| `/account/register` | Create an account with username, optional display name and password |
+| `/account/logout` | Signs out (the **Sair** button in the top bar) |
 
-Every UI page requires a signed-in user; anonymous visitors are redirected to the login page. Mock calls do **not** require sign-in.
+Every UI page requires a signed-in user; anonymous visitors are redirected to the login page. Route calls do **not** require sign-in.
 
 ### Username and password
 
-- Username: 3 to 32 characters — letters, numbers, `.`, `_` or `-` (case-insensitive and unique)
-- Password: at least 8 characters, stored as a salted hash (ASP.NET Core Identity `PasswordHasher`)
-- The session cookie lasts 14 days (sliding)
+- Username: 3 to 32 characters — letters, numbers and `-` (no `-` at the start, at the end or doubled). It is part of the route URLs, so characters that are not URL-safe are rejected. It is stored lowercased and must be unique.
+- Display name: optional; shown in the top bar. Defaults to the username.
+- Password: at least 8 characters, stored as a salted hash (ASP.NET Core Identity `PasswordHasher`).
+- The session cookie lasts 14 days (sliding). If the user no longer exists in the database, the session is rejected and the user must sign in again.
 
 ### GitHub
 
@@ -78,14 +89,14 @@ The **Sign in with GitHub** button only appears when an OAuth App is configured:
 2. Store the credentials outside the repository, e.g. with user-secrets:
 
    ```bash
-   dotnet user-secrets --project RestMock init
-   dotnet user-secrets --project RestMock set "Authentication:GitHub:ClientId" "<client id>"
-   dotnet user-secrets --project RestMock set "Authentication:GitHub:ClientSecret" "<client secret>"
+   dotnet user-secrets --project Imockey init
+   dotnet user-secrets --project Imockey set "Authentication:GitHub:ClientId" "<client id>"
+   dotnet user-secrets --project Imockey set "Authentication:GitHub:ClientSecret" "<client secret>"
    ```
 
    Or use the environment variables `Authentication__GitHub__ClientId` and `Authentication__GitHub__ClientSecret`.
 
-The first GitHub sign-in creates a RestMock user linked to that GitHub account. GitHub users and username/password users are separate accounts.
+The first GitHub sign-in creates an imockey user linked to that GitHub account, with a username derived from the GitHub login (lowercased, non-URL-safe characters replaced by `-`; a numeric suffix such as `-2` is added if it is already taken). GitHub users and username/password users are separate accounts — they are never linked.
 
 ---
 
@@ -96,76 +107,82 @@ After signing in, the home page (`/`) lists your applications and has a form to 
 | Field | Required | Description |
 | --- | --- | --- |
 | Name | yes | Display name |
-| Slug | no | First URL segment of the mocks. Lowercase letters, numbers and `-`, up to 50 characters. Generated from the name when empty (`Payment Service` → `payment-service`). Must be unique across all users and cannot be a [reserved route](#reserved-routes). |
+| Slug | no | Lowercase letters, numbers and `-`, up to 50 characters. Generated from the name when empty (`Payment Service` → `payment-service`). The form previews the resulting base URL. |
 | Description | no | Free text |
 
-The list shows each application's base URL, number of mocks and creation date. Click the name (or **→**) to open its Mock Manager. **✕** deletes the application **and all of its mocks**.
+The stored slug is always prefixed with your username: slug `payment-service` for user `alice` becomes `alice-payment-service`, the first segment of the routes' URLs. It must be unique across all users and cannot be a [reserved route](#reserved-routes).
+
+After creating an application you are taken to its Route Manager. The list shows each application's base URL, number of routes and creation date. Click the name (or **→**) to open its Route Manager. **✕** deletes the application **and all of its routes** (asks for confirmation first).
 
 ---
 
-## Mock Manager
+## Route Manager
 
-Opened at `/apps/{applicationId}`. Only the owner can open it; anyone else sees "application not found".
+Opened at `/apps/{applicationId}`. Only the owner can open it; anyone else sees "Aplicação não encontrada" (application not found), whether it exists or not.
 
-The header shows the application's base URL (`http://localhost:5087/{slug}/...`). The screen is split into two columns:
+The header shows the application's base URL (`http://localhost:5087/{username}-{slug}/...`). The screen is split into two columns:
 
-- **Left** — form for creating or editing mocks
-- **Right** — list of the application's mocks
+- **Left** — form for creating or editing routes
+- **Right** — list of the application's routes
 
-The list updates automatically in real time via Blazor Server (SignalR).
+The list updates automatically in real time via Blazor Server (SignalR) when routes of the application change.
 
 ### Form
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| Description | text | — | Free text to document the purpose of the mock. Optional. |
+| Description | text | — | Free text to document the purpose of the route. Optional. |
 | HTTP Method | dropdown | GET | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS |
-| Pattern (URL) | text | — | Endpoint address inside the application. Required. Supports wildcards (see [Pattern Matching Rules](#pattern-matching-rules)) |
-| Status Code | number | 200 | HTTP response code. Between 100 and 599 |
-| Processing time (ms) | number | 0 | Delay in milliseconds before responding |
-| Content-Type | dropdown | application/json | Response MIME type |
+| Pattern (URL) | text | — | Endpoint address inside the application. Required; a leading `/` is added if missing. Supports wildcards (see [Pattern Matching Rules](#pattern-matching-rules)) |
+| Status Code | number | 200 | HTTP response code, between 100 and 599. Suggestions for common codes. |
+| Processing time (ms) | number | 0 | Delay in milliseconds before responding (negative values become 0) |
+| Content-Type | dropdown | application/json | Response MIME type (JSON, XML, text, HTML, CSV, images, etc.) |
 | Response body | textarea | — | Response body. Optional. Supports variables (see [Response Body Variables](#response-body-variables)) |
 
-**Buttons:** **Create mock** / **Save changes**, **{ } Format** (formats the response body JSON), **Clear** / **Cancel**.
+**Buttons:** **Criar rota** / **Salvar alterações** (create / save), **{ } Formatar** (formats the response body JSON), **Limpar** / **Cancelar** (clear / cancel).
 
-### Mock List
+### Route List
 
 | Button | Action |
 | --- | --- |
-| **▸** | Expands mock details (ID, description, and response body) |
-| **✎** | Loads the mock into the form for editing |
-| **<>** | Copies the equivalent `curl` command (with the slug) to the clipboard |
-| **✕** | Deletes the mock (asks for confirmation first) |
+| **▸** | Expands route details (ID, description and response body) |
+| **✎** | Loads the route into the form for editing |
+| **⏸** / **▶** | Disables / re-enables the route. A disabled route is shown faded with a "desativada" tag and is ignored by calls: the request falls through to the next matching route or gets a 404. Editing a disabled route does not re-enable it. |
+| **<>** | Copies the equivalent `curl` command (with the full URL) to the clipboard |
+| **✕** | Deletes the route (asks for confirmation first) |
 
-**Export YAML** downloads an OpenAPI 3 document of the application's mocks, titled with the application name and with the base URL as `servers`.
+In the list header:
+
+- **Exportar YAML** downloads `{username}-{slug}.openapi.yaml`, an OpenAPI 3 document of the application's routes, titled with the application name and with the base URL as `servers`. Disabled while the application has no routes.
+- **Atualizar** reloads the list.
 
 ---
 
-## Calling a Mock
+## Calling a Route
 
 ```text
-{method} http://localhost:5087/{slug}{pattern}
+{method} http://localhost:5087/{username}-{slug}{pattern}
 ```
 
 | Request | Result |
 | --- | --- |
-| Slug and pattern match a mock | The mock's status, content type and body |
-| Slug belongs to an application but no mock matches | `404 Not Found` |
-| Slug does not belong to any application | Falls through to the UI (login redirect or "page not found") |
+| First segment and pattern match a route | The route's status, content type and body, after the processing time |
+| First segment belongs to an application but no route matches | `404 Not Found` |
+| First segment does not belong to any application | Falls through to the UI (login redirect or "Página não encontrada") |
 
-Mocks of one application are never matched through another application's slug. The slug is case-insensitive.
+Routes of one application are never matched through another application's URL. The first segment is case-insensitive.
 
 ---
 
 ## Pattern Matching Rules
 
-After the slug is removed from the path, matching checks, in this order:
+After the `/{username}-{slug}` segment is removed from the path (an empty path becomes `/`), matching checks, in this order:
 
 1. **HTTP method** — must be equal (case-insensitive)
 2. **Path** — must match the pattern (case-insensitive)
-3. **Query string** — if the pattern has a query, all declared parameters must be present in the request with the correct types
+3. **Query string** — if the pattern has a query, all declared parameters must be present in the request, with the correct type when one is declared
 
-Extra query string parameters in the request are ignored. When more than one mock matches, the first one created wins.
+Extra query string parameters in the request are ignored. When more than one route matches, the first one created wins.
 
 ### Path Wildcards
 
@@ -176,7 +193,7 @@ Extra query string parameters in the request are ignored. When more than one moc
 | `{int}`, `{long}`, `{number}` | Integer (positive or negative) | `/items/{int}` | `/items/42`, `/items/-1` |
 | `{date}` | Date in `YYYY-MM-DD` format | `/events/{date}` | `/events/2024-12-31` |
 | `{datetime}` | ISO 8601 date/time | `/logs/{datetime}` | `/logs/2024-12-31T10:00:00Z` |
-| `{name}` | Any non-empty segment (any name) | `/users/{id}` | `/users/abc`, `/users/123` |
+| `{name}` | Any non-empty segment (any other name) | `/users/{id}` | `/users/abc`, `/users/123` |
 | `{type?}` | `?` suffix makes the segment optional | `/users/{guid?}` | `/users` or `/users/3fa85f64-...` |
 
 ### Query String Validation
@@ -192,18 +209,20 @@ Use the `[type]` syntax in query parameter values:
 | `[guid]` | Valid UUID/GUID |
 | `[int]` | Integer number |
 | `[date]` or `[datetime]` | Parseable date |
-| `[string]` | Any non-empty value |
+| `[string]` | Any value (only presence is checked) |
 
-**Examples** (application slug `store`):
+A literal value (e.g. `?status=active`) is not compared — only the presence of the parameter is checked.
+
+**Examples** (application `store` of user `alice`):
 
 ```text
-/api/orders                          → GET /store/api/orders
-/api/orders/{guid}                   → GET /store/api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6
-/v*/products/{int}                   → GET /store/v1/products/10, GET /store/v2/products/99
-/reports/{date}                      → GET /store/reports/2024-01-15
-/search?q=[string]&page=[int]        → GET /store/search?q=hello&page=2
-/users/{uuid?}                       → GET /store/users  or  GET /store/users/3fa85f64-...
-/                                    → GET /store
+/api/orders                          → GET /alice-store/api/orders
+/api/orders/{guid}                   → GET /alice-store/api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6
+/v*/products/{int}                   → GET /alice-store/v1/products/10, GET /alice-store/v2/products/99
+/reports/{date}                      → GET /alice-store/reports/2024-01-15
+/search?q=[string]&page=[int]        → GET /alice-store/search?q=hello&page=2
+/users/{uuid?}                       → GET /alice-store/users  or  GET /alice-store/users/3fa85f64-...
+/                                    → GET /alice-store
 ```
 
 ---
@@ -222,7 +241,7 @@ The response body supports variable substitution using the `{{expression}}` synt
 **Rules:**
 
 - If the JSONPath property does not exist in the body → replaced with an empty string
-- If the request body is absent or not valid JSON → all `{{$.x}}` expressions become empty strings
+- If the request body is absent or not valid JSON → `{{$.x}}` expressions are kept literally in the output
 - Unrecognized expressions → kept literally in the output
 
 **Example:**
@@ -259,7 +278,7 @@ Returned response:
 
 ## Use Cases
 
-All examples assume an application with slug `store`. Create each mock in the Mock Manager with the values shown.
+All examples assume user `alice` with an application whose slug is `store` (base URL `/alice-store`). Create each route in the Route Manager with the values shown.
 
 ### Simulate resource creation with a dynamic ID
 
@@ -271,7 +290,7 @@ All examples assume an application with slug `store`. Create each mock in the Mo
 | Response body | `{ "id": "{{uuid}}", "name": "{{$.name}}", "email": "{{$.email}}" }` |
 
 ```bash
-curl -X POST http://localhost:5087/store/api/users \
+curl -X POST http://localhost:5087/alice-store/api/users \
   -H "Content-Type: application/json" \
   -d '{ "name": "Alice", "email": "alice@example.com" }'
 ```
@@ -307,9 +326,9 @@ curl -X POST http://localhost:5087/store/api/users \
 | Pattern | `/api/orders/{guid}` |
 | Response body | `{ "id": "{{uuid}}", "status": "shipped" }` |
 
-Accepts: `GET /store/api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6`
+Accepts: `GET /alice-store/api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6`
 
-Rejects with 404: `GET /store/api/orders/abc` (not a valid UUID)
+Rejects with 404: `GET /alice-store/api/orders/abc` (not a valid UUID)
 
 ### Endpoint with typed query string
 
@@ -319,9 +338,9 @@ Rejects with 404: `GET /store/api/orders/abc` (not a valid UUID)
 | Pattern | `/api/products?category=[string]&page=[int]` |
 | Response body | `{ "items": [] }` |
 
-Accepts: `GET /store/api/products?category=electronics&page=1`
+Accepts: `GET /alice-store/api/products?category=electronics&page=1`
 
-Rejects with 404: `GET /store/api/products?category=electronics&page=abc` (page is not an integer)
+Rejects with 404: `GET /alice-store/api/products?category=electronics&page=abc` (page is not an integer)
 
 ### Wildcard version endpoint
 
@@ -331,18 +350,18 @@ Rejects with 404: `GET /store/api/products?category=electronics&page=abc` (page 
 | Pattern | `/v*/health` |
 | Response body | `{ "status": "ok" }` |
 
-Accepts: `/store/v1/health`, `/store/v2/health`, `/store/v10/health`
+Accepts: `/alice-store/v1/health`, `/alice-store/v2/health`, `/alice-store/v10/health`
 
 ---
 
 ## Reserved Routes
 
-The following first path segments belong to the system. They never reach the mock dispatcher and **cannot be used as application slugs**:
+The following first path segments belong to the system. They never reach the route dispatcher, and an application whose `{username}-{slug}` would equal one of them is refused:
 
 | Segment | Usage |
 | --- | --- |
 | `/account` | Login, registration and logout |
-| `/apps` | Mock Manager pages |
+| `/apps` | Route Manager pages |
 | `/signin-github` | GitHub OAuth callback |
 | `/_blazor` | Blazor SignalR hub |
 | `/_framework` | Blazor framework files |
@@ -355,15 +374,65 @@ The following first path segments belong to the system. They never reach the moc
 
 ## Persistence
 
-Users, applications and mocks are stored in a SQLite database at `RestMock/mocks.db`, created automatically on startup. Deleting an application deletes its mocks. To reset everything, stop the server and delete the file.
+Users, applications, routes and the ASP.NET Core Data Protection keys (which sign the login cookie) are stored in a SQLite database at `Imockey/data/mocks.db`, created automatically on startup. Deleting an application deletes its routes.
+
+The location can be changed with the `Database:Path` setting (environment variable `Database__Path`); relative paths are resolved against the application folder. The database runs in WAL mode, so `mocks.db-wal` and `mocks.db-shm` files may appear next to it.
+
+To reset everything, stop the server and delete `mocks.db` (and `mocks.db-wal` / `mocks.db-shm`, if present). Existing sessions become invalid and users must register again.
+
+---
+
+## Deployment
+
+The repository includes a `Dockerfile` that runs imockey under [Litestream](https://litestream.io), which replicates `mocks.db` to Azure Blob Storage and restores it on every container start. This makes it possible to run on platforms that scale to zero.
+
+- The image listens on port `8080` and stores the database at `/data/mocks.db`.
+- Replication is enabled when `AZURE_STORAGE_ACCOUNT` and `LITESTREAM_AZURE_ACCOUNT_KEY` are set; without them the app runs without replication.
+- Run **at most one replica**: SQLite + Litestream assume a single writing process.
+- The `Container` workflow publishes the image to GitHub Container Registry (`ghcr.io/phduarte/imockey`, tags `latest` and the short commit SHA) after the `.NET` workflow passes on `master`.
+
+The step-by-step guide for Azure Container Apps, aimed at near-zero cost, is in [docs/deploy-azure-container-apps.md](docs/deploy-azure-container-apps.md) (Portuguese).
+
+To run the image locally, without replication, using the same `Imockey/data` folder as local development (run from the repository root):
+
+```bash
+docker build -t imockey .
+docker run --rm -p 8080:8080 -v "$PWD/Imockey/data:/data" imockey
+```
+
+On Windows PowerShell, use `-v "${PWD}\Imockey\data:/data"`. Mount the **folder**, not the `mocks.db` file (SQLite in WAL mode writes `mocks.db-wal`/`mocks.db-shm` next to it). Don't run the container and `dotnet run` against the same folder at the same time. Without `-v`, the data is lost when the container is removed.
+
+---
+
+## Development
+
+| Environment | URL |
+| --- | --- |
+| HTTP | `http://localhost:5087` |
+| HTTPS | `https://localhost:7253` |
+
+```bash
+dotnet build Imockey        # stop the server first so the build can overwrite the executable
+dotnet test Imockey.Tests   # xUnit + FluentAssertions, against a temporary SQLite database
+```
+
+Contributor guidelines (architecture, business rules and how to add features) are in [CLAUDE.md](CLAUDE.md) (Portuguese).
+
+---
+
+## Market Analysis
+
+A feature analysis, a benchmark against similar products and suggested improvements for a paid plan are in [docs/analise-de-mercado.md](docs/analise-de-mercado.md) (Portuguese).
 
 ---
 
 ## Technologies
 
 - .NET 10 / ASP.NET Core
-- Blazor Server (visual interface) and Razor Pages (account pages)
+- Blazor Server (management UI) and Razor Pages (account pages)
 - Cookie authentication + GitHub OAuth ([AspNet.Security.OAuth.GitHub](https://github.com/aspnet-contrib/AspNet.Security.OAuth.Providers))
-- SQLite via Microsoft.Data.Sqlite
+- SQLite via Microsoft.Data.Sqlite (plain ADO.NET)
 - Newtonsoft.Json (JSONPath in response templating)
 - YamlDotNet (OpenAPI export)
+- Docker + Litestream (replication to Azure Blob Storage)
+- xUnit + FluentAssertions (tests)

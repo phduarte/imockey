@@ -1,0 +1,32 @@
+@page "/account/login"
+@model Imockey.Pages.Account.LoginModel
+@{
+    ViewData["Title"] = "Entrar";
+}
+
+<section class="auth-card">
+    <strong class="auth-title">imockey</strong>
+    <p class="auth-subtitle">Entre para continuar</p>
+
+    <form method="post" class="auth-form">
+        <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+        <label class="auth-label" asp-for="UserName">Usuário</label>
+        <input class="auth-input" asp-for="UserName" autocomplete="username" autofocus required />
+
+        <label class="auth-label" asp-for="Password">Senha</label>
+        <input class="auth-input" asp-for="Password" autocomplete="current-password" required />
+
+        @if (Model.Error is not null)
+        {
+            <span class="auth-error">@Model.Error</span>
+        }
+
+        <button class="auth-submit" type="submit">Entrar</button>
+    </form>
+
+    <partial name="_GitHubLogin" model="Model" />
+
+    <p class="auth-footer">
+        Não tem conta? <a asp-page="/Account/Register" asp-route-returnUrl="@Model.ReturnUrl">Criar conta</a>
+    </p>
+</section>

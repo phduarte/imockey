@@ -3,7 +3,7 @@ setlocal
 
 for %%p in (5087 7253) do call :liberar_porta %%p
 
-start "RestMock" cmd /c "dotnet run --project RestMock"
+start "imockey" cmd /c "dotnet run --project Imockey"
 timeout /t 5 /nobreak > nul
 start http://localhost:5087
 exit /b 0

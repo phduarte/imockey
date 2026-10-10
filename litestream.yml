@@ -1,0 +1,11 @@
+# Litestream configuration used by the container image (see docs/deploy-azure-container-apps.md).
+# Values in ${...} come from environment variables.
+dbs:
+  - path: ${Database__Path}
+    replicas:
+      - type: abs
+        account-name: ${AZURE_STORAGE_ACCOUNT}
+        account-key: ${LITESTREAM_AZURE_ACCOUNT_KEY}
+        bucket: imockey
+        path: mocks.db
+        retention: 168h

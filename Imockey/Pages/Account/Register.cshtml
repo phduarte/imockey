@@ -1,0 +1,44 @@
+@page "/account/register"
+@model Imockey.Pages.Account.RegisterModel
+@{
+    ViewData["Title"] = "Criar conta";
+}
+
+<section class="auth-card">
+    <strong class="auth-title">imockey</strong>
+    <p class="auth-subtitle">Crie sua conta. Cada usuário tem suas próprias aplicações e rotas, isolados dos demais.</p>
+
+    <form method="post" class="auth-form">
+        <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+        <label class="auth-label" asp-for="UserName">Usuário</label>
+        <input class="auth-input" asp-for="UserName" autocomplete="username" autofocus required
+               minlength="@Imockey.Services.UserService.MinUserNameLength"
+               maxlength="@Imockey.Services.UserService.MaxUserNameLength"
+               pattern="[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
+               title="Letras, números e '-' (sem '-' no início, no fim ou repetido)" />
+        <small class="auth-hint">Faz parte da URL das suas rotas: <code>/usuario-aplicacao/...</code></small>
+
+        <label class="auth-label" asp-for="DisplayName">Nome de exibição <span class="optional">(opcional)</span></label>
+        <input class="auth-input" asp-for="DisplayName" autocomplete="name" />
+
+        <label class="auth-label" asp-for="Password">Senha</label>
+        <input class="auth-input" asp-for="Password" autocomplete="new-password" required
+               minlength="@Imockey.Services.UserService.MinPasswordLength" />
+
+        <label class="auth-label" asp-for="ConfirmPassword">Confirmar senha</label>
+        <input class="auth-input" asp-for="ConfirmPassword" autocomplete="new-password" required />
+
+        @if (Model.Error is not null)
+        {
+            <span class="auth-error">@Model.Error</span>
+        }
+
+        <button class="auth-submit" type="submit">Criar conta</button>
+    </form>
+
+    <partial name="_GitHubLogin" model="Model" />
+
+    <p class="auth-footer">
+        Já tem conta? <a asp-page="/Account/Login" asp-route-returnUrl="@Model.ReturnUrl">Entrar</a>
+    </p>
+</section>
