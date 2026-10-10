@@ -8,20 +8,28 @@ Servidor HTTP para criação de endpoints mockados. Útil em testes de integraç
 
 - [Conceitos](#conceitos)
 - [Início rápido](#início-rápido)
-- [Interface visual (Blazor UI)](#interface-visual-blazor-ui)
-- [API REST](#api-rest)
+- [Contas e login](#contas-e-login)
+- [Aplicações](#aplicações)
+- [Gerenciador de Mocks](#gerenciador-de-mocks)
+- [Chamando um mock](#chamando-um-mock)
 - [Regras de pattern matching](#regras-de-pattern-matching)
 - [Variáveis no response body](#variáveis-no-response-body)
 - [Casos de uso](#casos-de-uso)
+- [Rotas reservadas](#rotas-reservadas)
+- [Persistência](#persistência)
 - [Tecnologias](#tecnologias)
 
 ---
 
 ## Conceitos
 
-**Mock** — Cópia não funcional de um endpoint real. Retorna respostas configuradas sem nenhuma lógica de negócio.
+**Usuário** — Quem faz login no RestMock. Cada usuário só vê e gerencia as próprias aplicações.
 
-**Pattern** — Endereço do endpoint mockado (sem o host), podendo conter curingas e tipos de validação.
+**Aplicação** — Um conjunto de mocks que simula uma API real. Um usuário pode ter quantas aplicações quiser. Cada uma tem um **slug**, único entre todos os usuários, que vira o primeiro segmento da URL dos seus mocks.
+
+**Mock** — Cópia não funcional de um endpoint real. Retorna respostas configuradas sem nenhuma lógica de negócio. Todo mock pertence a uma aplicação.
+
+**Pattern** — Endereço do endpoint mockado dentro da aplicação (sem host nem slug), podendo conter curingas e tipos de validação.
 
 **Processing time** — Atraso artificial aplicado antes de responder, útil para simular latência ou timeout.
 
@@ -38,159 +46,124 @@ run.bat
 
 O `run.bat` inicia o servidor e abre automaticamente o navegador em `http://localhost:5087`.
 
-URLs disponíveis após iniciar:
-
-| Endereço | Descrição |
-| --- | --- |
-| `http://localhost:5087/` | Interface visual (Blazor UI) |
-| `http://localhost:5087/client` | Interface visual (alias) |
-| `http://localhost:5087/swagger` | Documentação da API (modo desenvolvimento) |
-
-> **Atenção:** os dados são armazenados apenas em memória. Todos os mocks são perdidos ao reiniciar o servidor.
+1. Crie uma conta em `/account/register` (ou entre com GitHub, se configurado).
+2. Crie uma aplicação, por exemplo **Loja API** com slug `loja`.
+3. Abra a aplicação e crie um mock, por exemplo `GET /v1/products`.
+4. Chame o mock: `curl http://localhost:5087/loja/v1/products`.
 
 ---
 
-## Interface visual (Blazor UI)
+## Contas e login
 
-Acesse `http://localhost:5087` para gerenciar os mocks pelo navegador.
+| Endereço | Descrição |
+| --- | --- |
+| `/account/login` | Login com usuário e senha, ou com GitHub |
+| `/account/register` | Cadastro com usuário e senha |
 
-### Layout
+Todas as páginas da interface exigem usuário logado; visitantes anônimos são redirecionados para o login. As chamadas aos mocks **não** exigem login.
 
-A tela é dividida em duas colunas:
+### Usuário e senha
 
-- **Esquerda** — formulário para criação de novos mocks
-- **Direita** — lista de mocks ativos com opções de detalhe e exclusão
+- Usuário: de 3 a 32 caracteres — letras, números, `.`, `_` ou `-` (único, sem diferenciar maiúsculas/minúsculas)
+- Senha: no mínimo 8 caracteres, armazenada como hash com salt (`PasswordHasher` do ASP.NET Core Identity)
+- O cookie de sessão dura 14 dias (renovado com o uso)
 
-A lista atualiza automaticamente em tempo real via Blazor Server (SignalR).
+### GitHub
 
-### Formulário de criação
+O botão **Entrar com GitHub** só aparece quando há um OAuth App configurado:
+
+1. Crie um OAuth App em <https://github.com/settings/developers> com a callback URL `http://localhost:5087/signin-github` (ajuste host/porta).
+2. Guarde as credenciais fora do repositório, por exemplo com user-secrets:
+
+   ```bash
+   dotnet user-secrets --project RestMock init
+   dotnet user-secrets --project RestMock set "Authentication:GitHub:ClientId" "<client id>"
+   dotnet user-secrets --project RestMock set "Authentication:GitHub:ClientSecret" "<client secret>"
+   ```
+
+   Ou use as variáveis de ambiente `Authentication__GitHub__ClientId` e `Authentication__GitHub__ClientSecret`.
+
+O primeiro login com GitHub cria um usuário do RestMock vinculado àquela conta do GitHub. Usuários do GitHub e usuários com senha são contas separadas.
+
+---
+
+## Aplicações
+
+Depois do login, a página inicial (`/`) lista suas aplicações e tem um formulário para criar uma nova.
+
+| Campo | Obrigatório | Descrição |
+| --- | --- | --- |
+| Nome | sim | Nome de exibição |
+| Slug | não | Primeiro segmento da URL dos mocks. Letras minúsculas, números e `-`, até 50 caracteres. Gerado a partir do nome quando vazio (`Serviço de Pagamentos` → `servico-de-pagamentos`). Deve ser único entre todos os usuários e não pode ser uma [rota reservada](#rotas-reservadas). |
+| Descrição | não | Texto livre |
+
+A lista mostra a URL base, a quantidade de mocks e a data de criação de cada aplicação. Clique no nome (ou em **→**) para abrir o Gerenciador de Mocks. **✕** exclui a aplicação **e todos os seus mocks**.
+
+---
+
+## Gerenciador de Mocks
+
+Aberto em `/apps/{applicationId}`. Só o dono consegue abrir; qualquer outro usuário vê "Aplicação não encontrada".
+
+O cabeçalho mostra a URL base da aplicação (`http://localhost:5087/{slug}/...`). A tela é dividida em duas colunas:
+
+- **Esquerda** — formulário de criação e edição de mocks
+- **Direita** — lista dos mocks da aplicação
+
+A lista é atualizada automaticamente em tempo real via Blazor Server (SignalR).
+
+### Formulário
 
 | Campo | Tipo | Padrão | Descrição |
 | --- | --- | --- | --- |
-| Método HTTP | dropdown | GET | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS |
-| Pattern (URL) | texto | — | Endereço do endpoint. Obrigatório. Suporta curingas (ver [Regras de pattern matching](#regras-de-pattern-matching)) |
 | Descrição | texto | — | Texto livre para documentar o propósito do mock. Opcional. |
+| Método HTTP | dropdown | GET | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS |
+| Pattern (URL) | texto | — | Endereço do endpoint dentro da aplicação. Obrigatório. Suporta curingas (ver [Regras de pattern matching](#regras-de-pattern-matching)) |
 | Status Code | número | 200 | Código HTTP de resposta. Entre 100 e 599 |
 | Processing time (ms) | número | 0 | Atraso em milissegundos antes de responder |
 | Content-Type | dropdown | application/json | Tipo MIME da resposta |
 | Response body | textarea | — | Corpo da resposta. Opcional. Suporta variáveis (ver [Variáveis no response body](#variáveis-no-response-body)) |
 
-**Botões:**
+**Botões:** **Criar mock** / **Salvar alterações**, **{ } Formatar** (formata o JSON do response body), **Limpar** / **Cancelar**.
 
-- **Criar mock** — valida e salva o endpoint
-- **{ } Formatar** — formata o JSON do response body
-- **Limpar** — reinicia o formulário para os valores padrão
-
-**Validações:**
-
-- Pattern é obrigatório
-- Status Code deve estar entre 100 e 599
-
-### Lista de mocks ativos
-
-Exibe todos os endpoints cadastrados em tabela com as colunas: Método, Pattern, Status, Content-Type, Delay e Ações.
+### Lista de mocks
 
 | Botão | Ação |
 | --- | --- |
 | **▸** | Expande os detalhes do mock (ID, descrição e response body) |
 | **✎** | Carrega o mock no formulário para edição |
-| **<>** | Copia o comando `curl` equivalente para a área de transferência |
+| **<>** | Copia o comando `curl` equivalente (com o slug) para a área de transferência |
 | **✕** | Exclui o mock (pede confirmação antes) |
+
+**Exportar YAML** baixa um documento OpenAPI 3 com os mocks da aplicação, com o nome da aplicação como título e a URL base em `servers`.
 
 ---
 
-## API REST
+## Chamando um mock
 
-Todos os endpoints de gerenciamento ficam sob o prefixo `/mocks`.
-
-### Modelo
-
-| Campo | Tipo | Padrão | Descrição |
-| --- | --- | --- | --- |
-| `id` | uuid | auto | Identificador único. Gerado automaticamente. |
-| `httpMethod` | string | `"GET"` | Método HTTP: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS |
-| `pattern` | string | — | Endereço do endpoint mockado (sem host) |
-| `statusCode` | int | `200` | Código HTTP de resposta (100–599) |
-| `processingTime` | int | `0` | Atraso em milissegundos (mínimo 0) |
-| `contentType` | string | `"application/json"` | Tipo MIME da resposta |
-| `responseBody` | object | `null` | Corpo da resposta. Pode ser string, JSON ou null |
-| `description` | string | `null` | Descrição opcional do mock. Puramente informativa. |
-
-### `POST /mocks` — criar mock
-
-```http
-POST /mocks
-Content-Type: application/json
-
-{
-  "httpMethod": "POST",
-  "pattern": "/api/v1/users",
-  "statusCode": 201,
-  "processingTime": 0,
-  "contentType": "application/json",
-  "responseBody": {
-    "id": "{{uuid}}",
-    "name": "{{$.name}}"
-  }
-}
+```text
+{método} http://localhost:5087/{slug}{pattern}
 ```
 
-**Resposta:** `201 Created` com o mock criado no body e o header `Location: /mocks/{id}`.
+| Requisição | Resultado |
+| --- | --- |
+| Slug e pattern casam com um mock | Status, content type e body do mock |
+| Slug pertence a uma aplicação, mas nenhum mock casa | `404 Not Found` |
+| Slug não pertence a nenhuma aplicação | Segue para a interface (redirect para o login ou "página não encontrada") |
 
-### `GET /mocks` — listar todos
-
-```http
-GET /mocks
-```
-
-**Resposta:** `200 OK` com array de todos os mocks.
-
-### `GET /mocks/{id}` — buscar por ID
-
-```http
-GET /mocks/3fa85f64-5717-4562-b3fc-2c963f66afa6
-```
-
-**Resposta:** `200 OK` com o mock, ou `404 Not Found`.
-
-### `PUT /mocks/{id}` — editar mock
-
-```http
-PUT /mocks/3fa85f64-5717-4562-b3fc-2c963f66afa6
-Content-Type: application/json
-
-{
-  "httpMethod": "GET",
-  "pattern": "/api/users",
-  "statusCode": 200,
-  "processingTime": 0,
-  "contentType": "application/json",
-  "description": "Lista todos os usuários",
-  "responseBody": { "items": [] }
-}
-```
-
-**Resposta:** `200 OK` com o mock atualizado, ou `404 Not Found`.
-
-### `DELETE /mocks/{id}` — excluir
-
-```http
-DELETE /mocks/3fa85f64-5717-4562-b3fc-2c963f66afa6
-```
-
-**Resposta:** `204 No Content`, ou `404 Not Found`.
+Mocks de uma aplicação nunca são encontrados pelo slug de outra. O slug não diferencia maiúsculas de minúsculas.
 
 ---
 
 ## Regras de pattern matching
 
-O matching de uma requisição com um mock verifica, nessa ordem:
+Depois de remover o slug do path, o matching verifica, nesta ordem:
 
 1. **Método HTTP** — deve ser igual (case-insensitive)
-2. **Path** — deve corresponder ao padrão (case-insensitive)
-3. **Query string** — se o pattern tiver query, todos os parâmetros declarados devem estar presentes na requisição com os tipos corretos
+2. **Path** — deve corresponder ao pattern (case-insensitive)
+3. **Query string** — se o pattern declarar query, todos os parâmetros declarados devem estar presentes na requisição com o tipo correto
 
-Parâmetros extras na query string da requisição são ignorados.
+Parâmetros extras na query string da requisição são ignorados. Quando mais de um mock casa, vence o criado primeiro.
 
 ### Curingas no path
 
@@ -201,7 +174,7 @@ Parâmetros extras na query string da requisição são ignorados.
 | `{int}`, `{long}`, `{number}` | Número inteiro (positivo ou negativo) | `/items/{int}` | `/items/42`, `/items/-1` |
 | `{date}` | Data no formato `YYYY-MM-DD` | `/events/{date}` | `/events/2024-12-31` |
 | `{datetime}` | Data/hora ISO 8601 | `/logs/{datetime}` | `/logs/2024-12-31T10:00:00Z` |
-| `{nome}` | Qualquer segmento não vazio (nome qualquer) | `/users/{id}` | `/users/abc`, `/users/123` |
+| `{nome}` | Qualquer segmento não vazio (qualquer nome) | `/users/{id}` | `/users/abc`, `/users/123` |
 | `{tipo?}` | Sufixo `?` torna o segmento opcional | `/users/{guid?}` | `/users` ou `/users/3fa85f64-...` |
 
 ### Validação de query string
@@ -219,15 +192,16 @@ Use a sintaxe `[tipo]` nos valores dos parâmetros de query:
 | `[date]` ou `[datetime]` | Data parseável |
 | `[string]` | Qualquer valor não vazio |
 
-**Exemplos:**
+**Exemplos** (aplicação com slug `loja`):
 
 ```text
-/api/orders                          → GET /api/orders
-/api/orders/{guid}                   → GET /api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6
-/v*/products/{int}                   → GET /v1/products/10, GET /v2/products/99
-/reports/{date}                      → GET /reports/2024-01-15
-/search?q=[string]&page=[int]        → GET /search?q=hello&page=2
-/users/{uuid?}                       → GET /users  ou  GET /users/3fa85f64-...
+/api/orders                          → GET /loja/api/orders
+/api/orders/{guid}                   → GET /loja/api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6
+/v*/products/{int}                   → GET /loja/v1/products/10, GET /loja/v2/products/99
+/reports/{date}                      → GET /loja/reports/2024-01-15
+/search?q=[string]&page=[int]        → GET /loja/search?q=hello&page=2
+/users/{uuid?}                       → GET /loja/users  ou  GET /loja/users/3fa85f64-...
+/                                    → GET /loja
 ```
 
 ---
@@ -238,16 +212,16 @@ O response body suporta substituição de variáveis com a sintaxe `{{expressão
 
 | Expressão | Resultado |
 | --- | --- |
-| `{{uuid}}` | UUID aleatório gerado na hora |
-| `{{$.propriedade}}` | Valor da propriedade `propriedade` do request body (JSON) |
+| `{{uuid}}` | UUID gerado aleatoriamente |
+| `{{$.propriedade}}` | Valor do campo `propriedade` do request body (JSON) |
 | `{{$.user.address.city}}` | Suporta caminhos aninhados |
 | `{{$.items[0]}}` | Suporta acesso a índices de array |
 
 **Regras:**
 
-- Se a propriedade do JSONPath não existir no body → substituída por string vazia
+- Se a propriedade JSONPath não existir no body → substituída por string vazia
 - Se o request body estiver ausente ou não for JSON válido → todas as expressões `{{$.x}}` viram string vazia
-- Expressões não reconhecidas → mantidas literalmente no output
+- Expressões não reconhecidas → mantidas literalmente na saída
 
 **Exemplo:**
 
@@ -268,7 +242,7 @@ Response body configurado:
 }
 ```
 
-Response retornado:
+Resposta retornada:
 
 ```json
 {
@@ -283,138 +257,111 @@ Response retornado:
 
 ## Casos de uso
 
+Todos os exemplos assumem uma aplicação com slug `loja`. Crie cada mock no Gerenciador de Mocks com os valores indicados.
+
 ### Simular criação de recurso com ID dinâmico
 
-Criar o mock via API:
+| Campo | Valor |
+| --- | --- |
+| Método | `POST` |
+| Pattern | `/api/users` |
+| Status Code | `201` |
+| Response body | `{ "id": "{{uuid}}", "name": "{{$.name}}", "email": "{{$.email}}" }` |
 
-```json
-POST /mocks
-{
-  "httpMethod": "POST",
-  "pattern": "/api/users",
-  "statusCode": 201,
-  "contentType": "application/json",
-  "responseBody": {
-    "id": "{{uuid}}",
-    "name": "{{$.name}}",
-    "email": "{{$.email}}"
-  }
-}
+```bash
+curl -X POST http://localhost:5087/loja/api/users \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Alice", "email": "alice@example.com" }'
 ```
 
-Chamar o mock:
-
-```http
-POST /api/users
-Content-Type: application/json
-
-{ "name": "João", "email": "joao@example.com" }
-```
-
-Resposta:
-
 ```json
-{
-  "id": "a3f2c1d4-...",
-  "name": "João",
-  "email": "joao@example.com"
-}
+{ "id": "a3f2c1d4-...", "name": "Alice", "email": "alice@example.com" }
 ```
 
 ### Simular timeout / endpoint lento
 
-```json
-POST /mocks
-{
-  "httpMethod": "GET",
-  "pattern": "/api/reports",
-  "statusCode": 504,
-  "processingTime": 60000,
-  "responseBody": { "error": "Gateway Timeout" }
-}
-```
+| Campo | Valor |
+| --- | --- |
+| Método | `GET` |
+| Pattern | `/api/reports` |
+| Status Code | `504` |
+| Processing time | `60000` |
+| Response body | `{ "error": "Gateway Timeout" }` |
 
 ### Simular erro de autenticação
 
-```json
-POST /mocks
-{
-  "httpMethod": "GET",
-  "pattern": "/api/protected",
-  "statusCode": 401,
-  "responseBody": { "error": "Unauthorized" }
-}
-```
+| Campo | Valor |
+| --- | --- |
+| Método | `GET` |
+| Pattern | `/api/protected` |
+| Status Code | `401` |
+| Response body | `{ "error": "Unauthorized" }` |
 
 ### Endpoint com parâmetro tipado na URL
 
-```json
-POST /mocks
-{
-  "httpMethod": "GET",
-  "pattern": "/api/orders/{guid}",
-  "statusCode": 200,
-  "responseBody": { "id": "{{uuid}}", "status": "shipped" }
-}
-```
+| Campo | Valor |
+| --- | --- |
+| Método | `GET` |
+| Pattern | `/api/orders/{guid}` |
+| Response body | `{ "id": "{{uuid}}", "status": "shipped" }` |
 
-Aceita: `GET /api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6`
+Aceita: `GET /loja/api/orders/3fa85f64-5717-4562-b3fc-2c963f66afa6`
 
-Rejeita: `GET /api/orders/abc` (não é UUID válido)
+Rejeita com 404: `GET /loja/api/orders/abc` (não é um UUID válido)
 
 ### Endpoint com query string tipada
 
-```json
-POST /mocks
-{
-  "httpMethod": "GET",
-  "pattern": "/api/products?category=[string]&page=[int]",
-  "statusCode": 200,
-  "responseBody": { "items": [] }
-}
-```
+| Campo | Valor |
+| --- | --- |
+| Método | `GET` |
+| Pattern | `/api/products?category=[string]&page=[int]` |
+| Response body | `{ "items": [] }` |
 
-Aceita: `GET /api/products?category=electronics&page=1`
+Aceita: `GET /loja/api/products?category=electronics&page=1`
 
-Rejeita: `GET /api/products?category=electronics&page=abc` (page não é inteiro)
+Rejeita com 404: `GET /loja/api/products?category=electronics&page=abc` (page não é inteiro)
 
-### Endpoint de versão curinga
+### Endpoint com versão curinga
 
-```json
-POST /mocks
-{
-  "httpMethod": "GET",
-  "pattern": "/v*/health",
-  "statusCode": 200,
-  "responseBody": { "status": "ok" }
-}
-```
+| Campo | Valor |
+| --- | --- |
+| Método | `GET` |
+| Pattern | `/v*/health` |
+| Response body | `{ "status": "ok" }` |
 
-Aceita: `/v1/health`, `/v2/health`, `/v10/health`
+Aceita: `/loja/v1/health`, `/loja/v2/health`, `/loja/v10/health`
 
 ---
 
 ## Rotas reservadas
 
-As seguintes rotas são reservadas pelo sistema e **não podem ser mockadas**:
+Os primeiros segmentos de path abaixo pertencem ao sistema. Eles nunca chegam ao despachante de mocks e **não podem ser usados como slug de aplicação**:
 
-| Prefixo | Uso |
+| Segmento | Uso |
 | --- | --- |
-| `/client` | Interface Blazor Client |
-| `/mocks` | API de gerenciamento |
-| `/swagger` | Documentação Swagger |
+| `/account` | Login, cadastro e logout |
+| `/apps` | Páginas do Gerenciador de Mocks |
+| `/signin-github` | Callback do OAuth do GitHub |
 | `/_blazor` | Hub SignalR do Blazor |
 | `/_framework` | Arquivos de framework Blazor |
 | `/_content` | Conteúdo estático de componentes |
-| `/css` | Estilos |
+| `/css` | Folhas de estilo |
 | `/js` | Scripts |
-| `/favicon` | Ícone do site |
+| `/favicon.ico` | Ícone do site |
+
+---
+
+## Persistência
+
+Usuários, aplicações e mocks são gravados em um banco SQLite em `RestMock/mocks.db`, criado automaticamente na inicialização. Excluir uma aplicação exclui seus mocks. Para zerar tudo, pare o servidor e apague o arquivo.
 
 ---
 
 ## Tecnologias
 
 - .NET 10 / ASP.NET Core
-- Blazor Server (interface visual)
-- Newtonsoft.Json (JSONPath no response templating)
-- Swagger / Swashbuckle 10.x (documentação da API)
+- Blazor Server (interface visual) e Razor Pages (páginas de conta)
+- Autenticação por cookie + OAuth do GitHub ([AspNet.Security.OAuth.GitHub](https://github.com/aspnet-contrib/AspNet.Security.OAuth.Providers))
+- SQLite via Microsoft.Data.Sqlite
+- Newtonsoft.Json (JSONPath no templating de resposta)
+- YamlDotNet (exportação OpenAPI)

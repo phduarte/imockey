@@ -5,37 +5,44 @@ namespace RestMock.Services;
 
 public class MockClientService
 {
-    private readonly IMockRepository _repository;
+    private readonly MockRepository _repository;
 
-    public event Action? OnChange;
+    // Argument is the id of the application whose mocks changed.
+    public event Action<Guid>? OnChange;
 
-    public MockClientService(IMockRepository repository)
+    public MockClientService(MockRepository repository)
     {
         _repository = repository;
     }
 
-    public IEnumerable<EndpointModel> GetAll() => EndpointCollection.GetAll();
+    public IReadOnlyList<EndpointModel> GetByApplication(Guid applicationId) => _repository.GetByApplication(applicationId);
 
-    public EndpointModel? GetById(Guid id) => EndpointCollection.GetById(id);
-
-    public void Add(EndpointModel endpoint)
+    public void Add(Guid applicationId, EndpointModel endpoint)
     {
-        EndpointCollection.Add(endpoint);
-        _repository.SaveAll(EndpointCollection.GetAll());
-        OnChange?.Invoke();
+        endpoint.ApplicationId = applicationId;
+        _repository.Add(endpoint);
+        OnChange?.Invoke(applicationId);
     }
 
-    public void Remove(Guid id)
+    public void Update(Guid applicationId, Guid id, EndpointModel updated)
     {
-        EndpointCollection.Remove(id);
-        _repository.SaveAll(EndpointCollection.GetAll());
-        OnChange?.Invoke();
+        EnsureBelongsTo(applicationId, id);
+        updated.Id = id;
+        updated.ApplicationId = applicationId;
+        _repository.Update(updated);
+        OnChange?.Invoke(applicationId);
     }
 
-    public void Update(Guid id, EndpointModel updated)
+    public void Remove(Guid applicationId, Guid id)
     {
-        EndpointCollection.Update(id, updated);
-        _repository.SaveAll(EndpointCollection.GetAll());
-        OnChange?.Invoke();
+        EnsureBelongsTo(applicationId, id);
+        _repository.Delete(id);
+        OnChange?.Invoke(applicationId);
+    }
+
+    private void EnsureBelongsTo(Guid applicationId, Guid id)
+    {
+        if (_repository.GetById(id)?.ApplicationId != applicationId)
+            throw new ArgumentException("Mock não encontrado nesta aplicação.", nameof(id));
     }
 }

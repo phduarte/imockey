@@ -8,9 +8,9 @@ namespace RestMock.Services;
 
 public static class OpenApiExporter
 {
-    public static string ExportYaml(IEnumerable<EndpointModel> endpoints)
+    public static string ExportYaml(IEnumerable<EndpointModel> endpoints, string title = "RestMock", string? serverUrl = null)
     {
-        var spec = BuildSpec(endpoints.ToList());
+        var spec = BuildSpec(endpoints.ToList(), title, serverUrl);
         var serializer = new SerializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .DisableAliases()
@@ -18,7 +18,7 @@ public static class OpenApiExporter
         return serializer.Serialize(spec);
     }
 
-    private static Dictionary<string, object> BuildSpec(List<EndpointModel> endpoints)
+    private static Dictionary<string, object> BuildSpec(List<EndpointModel> endpoints, string title, string? serverUrl)
     {
         var paths = new Dictionary<string, object>();
 
@@ -36,16 +36,21 @@ public static class OpenApiExporter
             pathObj[ep.HttpMethod.ToLowerInvariant()] = BuildOperation(ep, pathParams, queryParams);
         }
 
-        return new Dictionary<string, object>
+        var spec = new Dictionary<string, object>
         {
             ["openapi"] = "3.0.3",
             ["info"] = new Dictionary<string, object>
             {
-                ["title"] = "RestMock",
+                ["title"] = title,
                 ["version"] = "1.0.0"
-            },
-            ["paths"] = paths
+            }
         };
+
+        if (serverUrl is not null)
+            spec["servers"] = new List<object> { new Dictionary<string, object> { ["url"] = serverUrl } };
+
+        spec["paths"] = paths;
+        return spec;
     }
 
     private static Dictionary<string, object> BuildOperation(

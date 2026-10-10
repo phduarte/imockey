@@ -1,220 +1,241 @@
-@page "/"
-@page "/client"
+@page "/apps/{ApplicationId:guid}"
 @implements IDisposable
 @inject MockClientService MockService
+@inject ApplicationService AppService
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
-<PageTitle>Gerenciador de Mocks</PageTitle>
+@if (_notFound)
+{
+    <PageTitle>Aplicação não encontrada</PageTitle>
+    <h1>Aplicação não encontrada</h1>
+    <div class="empty">
+        Esta aplicação não existe ou pertence a outro usuário. <a href="">Voltar para minhas aplicações</a>
+    </div>
+}
+else if (_application is not null)
+{
+    <PageTitle>@_application.Name · Gerenciador de Mocks</PageTitle>
 
-<h1>Gerenciador de Mocks</h1>
+    <div class="page-header">
+        <a class="back-link" href="">← Aplicações</a>
+        <h1>@_application.Name</h1>
+        <p class="muted">
+            Mocks em <code class="pattern">@BaseUrl/@_application.Slug/...</code>
+            @if (!string.IsNullOrWhiteSpace(_application.Description))
+            {
+                <span> · @_application.Description</span>
+            }
+        </p>
+    </div>
 
-<div class="grid">
-    <section class="card form-card">
-        <header class="card-header">
-            <h2>Novo Mock</h2>
-            <p class="muted">Crie um endpoint simulado preenchendo os campos abaixo.</p>
-        </header>
+    <div class="grid">
+        <section class="card form-card">
+            <header class="card-header">
+                <h2>Novo Mock</h2>
+                <p class="muted">Crie um endpoint simulado preenchendo os campos abaixo.</p>
+            </header>
 
-        <div class="form">
-            <div class="form-row">
-                <label>Descrição <span class="optional">(opcional)</span></label>
-                <input class="input" @bind="_form.Description" placeholder="Descreva o propósito deste mock" />
-            </div>
-
-            <div class="form-row">
-                <label>Método HTTP</label>
-                <select class="input" @bind="_form.HttpMethod">
-                    @foreach (var m in _methods)
-                    {
-                        <option value="@m">@m</option>
-                    }
-                </select>
-            </div>
-
-            <div class="form-row">
-                <div class="label-row">
-                    <label>Pattern (URL)</label>
-                    <span class="help" tabindex="0">?
-                        <span class="tooltip" role="tooltip">
-                            <strong>Wildcards no path</strong>
-                            <ul>
-                                <li><code>*</code> — qualquer valor em um segmento. Ex.: <code>/v*/heroes</code> casa <code>/v1/heroes</code>, <code>/v6/heroes</code>.</li>
-                                <li><code>{uuid}</code> ou <code>{guid}</code> — UUID/GUID</li>
-                                <li><code>{int}</code> — número inteiro</li>
-                                <li><code>{date}</code> — data <code>YYYY-MM-DD</code></li>
-                                <li><code>{datetime}</code> — data/hora ISO 8601</li>
-                                <li><code>{nome}</code> — qualquer segmento não vazio (qualquer nome dentro das chaves que não seja um tipo conhecido)</li>
-                                <li><code>{tipo?}</code> — sufixo <code>?</code> torna o segmento opcional. Ex.: <code>/v1/heroes/{uuid?}</code> casa tanto <code>/v1/heroes</code> quanto <code>/v1/heroes/3fa85f64-...</code></li>
-                            </ul>
-                            <strong>Query string</strong>
-                            <p>Use <code>[tipo]</code> nos parâmetros de query. Ex.: <code>/v1/movies?year=[int]&id=[guid]</code></p>
-                        </span>
-                    </span>
+            <div class="form">
+                <div class="form-row">
+                    <label>Descrição <span class="optional">(opcional)</span></label>
+                    <input class="input" @bind="_form.Description" placeholder="Descreva o propósito deste mock" />
                 </div>
-                <input class="input" @bind="_form.Pattern" placeholder="/v*/heroes/{uuid}" @ref="_patternInput" />
-            </div>
 
-            <div class="form-row two-cols">
-                <div>
-                    <label>Status Code</label>
-                    <input class="input" type="number" min="100" max="599" list="status-codes" @bind="_form.StatusCode" />
-                    <datalist id="status-codes">
-                        @foreach (var sc in _statusCodes)
+                <div class="form-row">
+                    <label>Método HTTP</label>
+                    <select class="input" @bind="_form.HttpMethod">
+                        @foreach (var m in _methods)
                         {
-                            <option value="@sc.Code">@sc.Code - @sc.Label</option>
+                            <option value="@m">@m</option>
                         }
-                    </datalist>
+                    </select>
                 </div>
-                <div>
-                    <label>Processing time (ms)</label>
-                    <input class="input" type="number" min="0" @bind="_form.ProcessingTime" />
-                </div>
-            </div>
 
-            <div class="form-row">
-                <label>Content-Type</label>
-                <select class="input" @bind="_form.ContentType">
-                    @foreach (var ct in _contentTypes)
-                    {
-                        <option value="@ct.Value">@ct.Label</option>
-                    }
-                </select>
-            </div>
-
-            <div class="form-row grow">
-                <div class="label-row">
-                    <label>Response body</label>
-                    <span class="help" tabindex="0">?
-                        <span class="tooltip" role="tooltip">
-                            <strong>Variáveis no response</strong>
-                            <ul>
-                                <li><code>{{uuid}}</code> — UUID aleatório gerado a cada requisição</li>
-                                <li><code>{{$.nome}}</code> — valor da propriedade <code>nome</code> do request body (JSON)</li>
-                                <li><code>{{$.user.address.city}}</code> — suporta caminhos aninhados</li>
-                                <li><code>{{$.items[0]}}</code> — suporta acesso a arrays</li>
-                            </ul>
-                            <strong>Exemplo</strong>
-                            <pre><code>&#123;
-  "id": "&#123;&#123;uuid&#125;&#125;",
-  "name": "&#123;&#123;$.name&#125;&#125;"
-&#125;</code></pre>
-                            <p>Se a propriedade não existir no body, é substituída por string vazia.</p>
+                <div class="form-row">
+                    <div class="label-row">
+                        <label>Pattern (URL)</label>
+                        <span class="help" tabindex="0">?
+                            <span class="tooltip" role="tooltip">
+                                <strong>Wildcards no path</strong>
+                                <ul>
+                                    <li><code>*</code> — qualquer valor em um segmento. Ex.: <code>/v*/heroes</code> casa <code>/v1/heroes</code>, <code>/v6/heroes</code>.</li>
+                                    <li><code>{uuid}</code> ou <code>{guid}</code> — UUID/GUID</li>
+                                    <li><code>{int}</code> — número inteiro</li>
+                                    <li><code>{date}</code> — data <code>YYYY-MM-DD</code></li>
+                                    <li><code>{datetime}</code> — data/hora ISO 8601</li>
+                                    <li><code>{nome}</code> — qualquer segmento não vazio (qualquer nome dentro das chaves que não seja um tipo conhecido)</li>
+                                    <li><code>{tipo?}</code> — sufixo <code>?</code> torna o segmento opcional. Ex.: <code>/v1/heroes/{uuid?}</code> casa tanto <code>/v1/heroes</code> quanto <code>/v1/heroes/3fa85f64-...</code></li>
+                                </ul>
+                                <strong>Query string</strong>
+                                <p>Use <code>[tipo]</code> nos parâmetros de query. Ex.: <code>/v1/movies?year=[int]&id=[guid]</code></p>
+                            </span>
                         </span>
-                    </span>
+                    </div>
+                    <input class="input" @bind="_form.Pattern" placeholder="/v*/heroes/{uuid}" @ref="_patternInput" />
                 </div>
-                <textarea class="input mono" @bind="_form.ResponseBody"
-                          placeholder='{ "message": "hello world" }'></textarea>
-            </div>
 
-            <div class="form-actions">
-                @if (_editingId.HasValue)
-                {
-                    <button class="btn btn-primary" @onclick="HandleUpdate">Salvar alterações</button>
-                    <button class="btn btn-ghost" @onclick="FormatResponseBody" title="Formatar o JSON do response body">{ } Formatar</button>
-                    <button class="btn btn-ghost" @onclick="ResetForm">Cancelar</button>
-                }
-                else
-                {
-                    <button class="btn btn-primary" @onclick="HandleCreate">Criar mock</button>
-                    <button class="btn btn-ghost" @onclick="FormatResponseBody" title="Formatar o JSON do response body">{ } Formatar</button>
-                    <button class="btn btn-ghost" @onclick="ResetForm">Limpar</button>
-                }
-            </div>
-
-            @if (!string.IsNullOrEmpty(_error))
-            {
-                <div class="alert alert-error">@_error</div>
-            }
-            @if (!string.IsNullOrEmpty(_info))
-            {
-                <div class="alert alert-ok">@_info</div>
-            }
-        </div>
-    </section>
-
-    <section class="card list-card">
-        <header class="card-header row">
-            <h2>Mocks ativos <span class="counter">@_mocks.Count</span></h2>
-            <div class="header-actions">
-                <button class="btn btn-ghost" @onclick="ExportOpenApi" disabled="@(_mocks.Count == 0)" title="Exportar como OpenAPI YAML">Exportar YAML</button>
-                <button class="btn btn-ghost" @onclick="Refresh">Atualizar</button>
-            </div>
-        </header>
-        @if (_editingId.HasValue)
-        {
-            <div class="alert alert-ok">Editando mock — faça as alterações no formulário ao lado.</div>
-        }
-
-        @if (_mocks.Count == 0)
-        {
-            <div class="empty">
-                Nenhum mock cadastrado ainda. Crie o primeiro no formulário ao lado.
-            </div>
-        }
-        else
-        {
-            <div class="table-wrapper">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Método</th>
-                            <th>Pattern</th>
-                            <th>Status</th>
-                            <th>Content-Type</th>
-                            <th class="delay-col">Delay</th>
-                            <th class="actions-col">Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var mock in _mocks)
-                        {
-                            <tr>
-                                <td><span class="method @MethodClass(mock.HttpMethod)">@mock.HttpMethod</span></td>
-                                <td><code class="pattern">@mock.Pattern</code></td>
-                                <td><span class="status @StatusClass(mock.StatusCode)">@mock.StatusCode</span></td>
-                                <td class="muted">@mock.ContentType</td>
-                                <td class="muted delay-col">@mock.ProcessingTime ms</td>
-                                <td class="actions-col">
-                                    <button class="btn-icon" title="Detalhes" @onclick="() => ToggleDetails(mock.Id)">
-                                        @(_expanded.Contains(mock.Id) ? "▾" : "▸")
-                                    </button>
-                                    <button class="btn-icon @(_editingId == mock.Id ? "active" : "")" title="Editar" @onclick="() => StartEdit(mock.Id)">
-                                        ✎
-                                    </button>
-                                    <button class="btn-icon btn-curl" title="Copiar curl" @onclick="() => CopyAsCurl(mock)">
-                                        &lt;&gt;
-                                    </button>
-                                    <button class="btn-icon danger" title="Excluir" @onclick="() => HandleDelete(mock.Id)">
-                                        ✕
-                                    </button>
-                                </td>
-                            </tr>
-                            @if (_expanded.Contains(mock.Id))
+                <div class="form-row two-cols">
+                    <div>
+                        <label>Status Code</label>
+                        <input class="input" type="number" min="100" max="599" list="status-codes" @bind="_form.StatusCode" />
+                        <datalist id="status-codes">
+                            @foreach (var sc in _statusCodes)
                             {
-                                <tr class="details">
-                                    <td colspan="6">
-                                        <div class="details-grid">
-                                            <div><strong>ID</strong><code>@mock.Id</code></div>
-                                            @if (!string.IsNullOrWhiteSpace(mock.Description))
-                                            {
-                                                <div><strong>Descrição</strong><span>@mock.Description</span></div>
-                                            }
-                                            <div class="details-body">
-                                                <strong>Response body</strong>
-                                                <pre class="mono">@(mock.ResponseBody?.ToString() ?? "(vazio)")</pre>
-                                            </div>
-                                        </div>
+                                <option value="@sc.Code">@sc.Code - @sc.Label</option>
+                            }
+                        </datalist>
+                    </div>
+                    <div>
+                        <label>Processing time (ms)</label>
+                        <input class="input" type="number" min="0" @bind="_form.ProcessingTime" />
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <label>Content-Type</label>
+                    <select class="input" @bind="_form.ContentType">
+                        @foreach (var ct in _contentTypes)
+                        {
+                            <option value="@ct.Value">@ct.Label</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="form-row grow">
+                    <div class="label-row">
+                        <label>Response body</label>
+                        <span class="help" tabindex="0">?
+                            <span class="tooltip" role="tooltip">
+                                <strong>Variáveis no response</strong>
+                                <ul>
+                                    <li><code>{{uuid}}</code> — UUID aleatório gerado a cada requisição</li>
+                                    <li><code>{{$.nome}}</code> — valor da propriedade <code>nome</code> do request body (JSON)</li>
+                                    <li><code>{{$.user.address.city}}</code> — suporta caminhos aninhados</li>
+                                    <li><code>{{$.items[0]}}</code> — suporta acesso a arrays</li>
+                                </ul>
+                                <strong>Exemplo</strong>
+                                <pre><code>&#123;
+      "id": "&#123;&#123;uuid&#125;&#125;",
+      "name": "&#123;&#123;$.name&#125;&#125;"
+    &#125;</code></pre>
+                                <p>Se a propriedade não existir no body, é substituída por string vazia.</p>
+                            </span>
+                        </span>
+                    </div>
+                    <textarea class="input mono" @bind="_form.ResponseBody"
+                              placeholder='{ "message": "hello world" }'></textarea>
+                </div>
+
+                <div class="form-actions">
+                    @if (_editingId.HasValue)
+                    {
+                        <button class="btn btn-primary" @onclick="HandleUpdate">Salvar alterações</button>
+                        <button class="btn btn-ghost" @onclick="FormatResponseBody" title="Formatar o JSON do response body">{ } Formatar</button>
+                        <button class="btn btn-ghost" @onclick="ResetForm">Cancelar</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="HandleCreate">Criar mock</button>
+                        <button class="btn btn-ghost" @onclick="FormatResponseBody" title="Formatar o JSON do response body">{ } Formatar</button>
+                        <button class="btn btn-ghost" @onclick="ResetForm">Limpar</button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div class="alert alert-error">@_error</div>
+                }
+                @if (!string.IsNullOrEmpty(_info))
+                {
+                    <div class="alert alert-ok">@_info</div>
+                }
+            </div>
+        </section>
+
+        <section class="card list-card">
+            <header class="card-header row">
+                <h2>Mocks ativos <span class="counter">@_mocks.Count</span></h2>
+                <div class="header-actions">
+                    <button class="btn btn-ghost" @onclick="ExportOpenApi" disabled="@(_mocks.Count == 0)" title="Exportar como OpenAPI YAML">Exportar YAML</button>
+                    <button class="btn btn-ghost" @onclick="Refresh">Atualizar</button>
+                </div>
+            </header>
+            @if (_editingId.HasValue)
+            {
+                <div class="alert alert-ok">Editando mock — faça as alterações no formulário ao lado.</div>
+            }
+
+            @if (_mocks.Count == 0)
+            {
+                <div class="empty">
+                    Nenhum mock cadastrado ainda. Crie o primeiro no formulário ao lado.
+                </div>
+            }
+            else
+            {
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Método</th>
+                                <th>Pattern</th>
+                                <th>Status</th>
+                                <th>Content-Type</th>
+                                <th class="delay-col">Delay</th>
+                                <th class="actions-col">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var mock in _mocks)
+                            {
+                                <tr>
+                                    <td><span class="method @MethodClass(mock.HttpMethod)">@mock.HttpMethod</span></td>
+                                    <td><code class="pattern">@mock.Pattern</code></td>
+                                    <td><span class="status @StatusClass(mock.StatusCode)">@mock.StatusCode</span></td>
+                                    <td class="muted">@mock.ContentType</td>
+                                    <td class="muted delay-col">@mock.ProcessingTime ms</td>
+                                    <td class="actions-col">
+                                        <button class="btn-icon" title="Detalhes" @onclick="() => ToggleDetails(mock.Id)">
+                                            @(_expanded.Contains(mock.Id) ? "▾" : "▸")
+                                        </button>
+                                        <button class="btn-icon @(_editingId == mock.Id ? "active" : "")" title="Editar" @onclick="() => StartEdit(mock.Id)">
+                                            ✎
+                                        </button>
+                                        <button class="btn-icon btn-curl" title="Copiar curl" @onclick="() => CopyAsCurl(mock)">
+                                            &lt;&gt;
+                                        </button>
+                                        <button class="btn-icon danger" title="Excluir" @onclick="() => HandleDelete(mock.Id)">
+                                            ✕
+                                        </button>
                                     </td>
                                 </tr>
+                                @if (_expanded.Contains(mock.Id))
+                                {
+                                    <tr class="details">
+                                        <td colspan="6">
+                                            <div class="details-grid">
+                                                <div><strong>ID</strong><code>@mock.Id</code></div>
+                                                @if (!string.IsNullOrWhiteSpace(mock.Description))
+                                                {
+                                                    <div><strong>Descrição</strong><span>@mock.Description</span></div>
+                                                }
+                                                <div class="details-body">
+                                                    <strong>Response body</strong>
+                                                    <pre class="mono">@(mock.ResponseBody?.ToString() ?? "(vazio)")</pre>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
                             }
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-    </section>
-</div>
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </div>
+}
 
 @code {
     private readonly string[] _methods = new[] { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" };
@@ -271,6 +292,15 @@
         ("image/svg+xml", "imagem svg"),
     };
 
+    [Parameter]
+    public Guid ApplicationId { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private ApplicationModel? _application;
+    private bool _notFound;
+    private bool _focusPending;
     private FormModel _form = new();
     private List<EndpointModel> _mocks = new();
     private HashSet<Guid> _expanded = new();
@@ -280,16 +310,31 @@
     private CancellationTokenSource? _infoCts;
     private ElementReference _patternInput;
 
-    protected override void OnInitialized()
+    private string BaseUrl => Nav.BaseUri.TrimEnd('/');
+
+    protected override async Task OnInitializedAsync()
     {
         MockService.OnChange += HandleChange;
-        Refresh();
+
+        var state = await AuthState;
+        var userId = state.User.GetUserId();
+        _application = userId is null ? null : AppService.GetOwned(ApplicationId, userId.Value);
+        _notFound = _application is null;
+
+        if (_application is not null)
+        {
+            Refresh();
+            _focusPending = true;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (_focusPending)
+        {
+            _focusPending = false;
             await _patternInput.FocusAsync();
+        }
     }
 
     public void Dispose()
@@ -299,8 +344,10 @@
         _infoCts?.Dispose();
     }
 
-    private void HandleChange()
+    private void HandleChange(Guid applicationId)
     {
+        if (applicationId != _application?.Id) return;
+
         InvokeAsync(() =>
         {
             Refresh();
@@ -310,7 +357,8 @@
 
     private void Refresh()
     {
-        _mocks = MockService.GetAll().ToList();
+        if (_application is null) return;
+        _mocks = MockService.GetByApplication(_application.Id).ToList();
     }
 
     private void HandleCreate()
@@ -343,7 +391,7 @@
                 Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description.Trim(),
             };
 
-            MockService.Add(model);
+            MockService.Add(_application!.Id, model);
             SetInfo($"Mock criado: {model.HttpMethod} {model.Pattern}");
             ResetForm();
         }
@@ -361,7 +409,7 @@
         _error = null;
         try
         {
-            MockService.Remove(id);
+            MockService.Remove(_application!.Id, id);
             _expanded.Remove(id);
             SetInfo("Mock removido.");
         }
@@ -429,7 +477,7 @@
                 Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description.Trim(),
             };
 
-            MockService.Update(_editingId!.Value, updated);
+            MockService.Update(_application!.Id, _editingId!.Value, updated);
             SetInfo($"Mock atualizado: {updated.HttpMethod} {updated.Pattern}");
             ResetForm();
         }
@@ -453,14 +501,13 @@
 
     private async Task ExportOpenApi()
     {
-        var yaml = OpenApiExporter.ExportYaml(_mocks);
-        await JS.InvokeVoidAsync("downloadFile", "openapi.yaml", yaml, "application/x-yaml");
+        var yaml = OpenApiExporter.ExportYaml(_mocks, _application!.Name, $"{BaseUrl}/{_application.Slug}");
+        await JS.InvokeVoidAsync("downloadFile", $"{_application.Slug}.openapi.yaml", yaml, "application/x-yaml");
     }
 
     private async Task CopyAsCurl(EndpointModel mock)
     {
-        var baseUrl = Nav.BaseUri.TrimEnd('/');
-        var curl = new System.Text.StringBuilder($"curl -X {mock.HttpMethod} \"{baseUrl}{mock.Pattern}\"");
+        var curl = new System.Text.StringBuilder($"curl -X {mock.HttpMethod} \"{BaseUrl}/{_application!.Slug}{mock.Pattern}\"");
 
         if (mock.HttpMethod is "POST" or "PUT" or "PATCH")
         {

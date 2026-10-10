@@ -6,4 +6,7 @@
 */bin/*
 */obj/*
 RestMock/mocks.json
+RestMock/mocks.json.migrated
+RestMock/mocks.db
+RestMock/mocks.db-*
 .claude/settings.local.json

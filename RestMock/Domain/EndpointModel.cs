@@ -8,6 +8,7 @@ public class EndpointModel
     int processtime = 0;
 
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ApplicationId { get; set; }
     public int StatusCode { get; set; } = 200;
     public string HttpMethod { get; init; } = "GET";
     public string Pattern { get; set; }

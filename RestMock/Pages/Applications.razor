@@ -1,0 +1,167 @@
+@page "/"
+@inject ApplicationService AppService
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>Minhas aplicações</PageTitle>
+
+<h1>Minhas aplicações</h1>
+
+<div class="grid">
+    <section class="card form-card">
+        <header class="card-header">
+            <h2>Nova aplicação</h2>
+            <p class="muted">Cada aplicação tem seu próprio conjunto de mocks, acessível pelo slug na URL.</p>
+        </header>
+
+        <div class="form">
+            <div class="form-row">
+                <label>Nome</label>
+                <input class="input" @bind="_form.Name" @bind:event="oninput" placeholder="Loja API" @ref="_nameInput" />
+            </div>
+
+            <div class="form-row">
+                <div class="label-row">
+                    <label>Slug <span class="optional">(opcional)</span></label>
+                    <span class="help" tabindex="0">?
+                        <span class="tooltip" role="tooltip">
+                            <strong>Slug</strong>
+                            <p>Primeiro segmento da URL dos mocks desta aplicação. Deve ser único entre todos os usuários.</p>
+                            <p>Letras minúsculas, números e <code>-</code>. Se vazio, é gerado a partir do nome.</p>
+                        </span>
+                    </span>
+                </div>
+                <input class="input mono" @bind="_form.Slug" @bind:event="oninput" placeholder="@SlugPlaceholder" />
+                <small class="muted">Mocks em <code class="pattern">@BaseUrl/@EffectiveSlug/...</code></small>
+            </div>
+
+            <div class="form-row">
+                <label>Descrição <span class="optional">(opcional)</span></label>
+                <textarea class="input" @bind="_form.Description" placeholder="Para que serve esta aplicação"></textarea>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="HandleCreate">Criar aplicação</button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-error">@_error</div>
+            }
+        </div>
+    </section>
+
+    <section class="card list-card">
+        <header class="card-header row">
+            <h2>Aplicações <span class="counter">@_applications.Count</span></h2>
+        </header>
+
+        @if (_applications.Count == 0)
+        {
+            <div class="empty">
+                Você ainda não tem aplicações. Crie a primeira no formulário ao lado.
+            </div>
+        }
+        else
+        {
+            <div class="table-wrapper">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>URL base</th>
+                            <th class="count-col">Mocks</th>
+                            <th class="date-col">Criada em</th>
+                            <th class="actions-col">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _applications)
+                        {
+                            <tr>
+                                <td>
+                                    <a href="apps/@item.Application.Id" class="app-name">@item.Application.Name</a>
+                                    @if (!string.IsNullOrWhiteSpace(item.Application.Description))
+                                    {
+                                        <div class="muted app-description">@item.Application.Description</div>
+                                    }
+                                </td>
+                                <td><code class="pattern">/@item.Application.Slug</code></td>
+                                <td class="count-col">@item.MockCount</td>
+                                <td class="muted date-col">@item.Application.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy")</td>
+                                <td class="actions-col">
+                                    <a class="btn-icon" title="Abrir" href="apps/@item.Application.Id">→</a>
+                                    <button class="btn-icon danger" title="Excluir" @onclick="() => HandleDelete(item.Application)">✕</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private Guid _userId;
+    private List<(ApplicationModel Application, int MockCount)> _applications = new();
+    private FormModel _form = new();
+    private string? _error;
+    private ElementReference _nameInput;
+
+    private string BaseUrl => Nav.BaseUri.TrimEnd('/');
+    private string SlugPlaceholder => string.IsNullOrWhiteSpace(_form.Name) ? "loja-api" : ApplicationService.Slugify(_form.Name);
+    private string EffectiveSlug => string.IsNullOrWhiteSpace(_form.Slug) ? SlugPlaceholder : _form.Slug.Trim().ToLowerInvariant();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState;
+        _userId = state.User.GetUserId() ?? Guid.Empty;
+        Refresh();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await _nameInput.FocusAsync();
+    }
+
+    private void Refresh()
+    {
+        _applications = AppService.GetByUser(_userId)
+            .Select(a => (a, AppService.CountMocks(a.Id)))
+            .ToList();
+    }
+
+    private void HandleCreate()
+    {
+        _error = null;
+        var (application, error) = AppService.Create(_userId, _form.Name, _form.Slug, _form.Description);
+        if (application is null)
+        {
+            _error = error;
+            return;
+        }
+
+        Nav.NavigateTo($"apps/{application.Id}");
+    }
+
+    private async Task HandleDelete(ApplicationModel application)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Excluir a aplicação \"{application.Name}\" e todos os seus mocks?");
+        if (!confirmed) return;
+
+        AppService.Delete(application.Id, _userId);
+        Refresh();
+    }
+
+    private class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Slug { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+    }
+}
