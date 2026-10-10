@@ -414,7 +414,7 @@ As seguintes rotas são reservadas pelo sistema e **não podem ser mockadas**:
 
 ## Tecnologias
 
-- .NET 9 / ASP.NET Core
+- .NET 10 / ASP.NET Core
 - Blazor Server (interface visual)
 - Newtonsoft.Json (JSONPath no response templating)
 - Swagger / Swashbuckle 10.x (documentação da API)

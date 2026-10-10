@@ -416,7 +416,7 @@ The following routes are reserved by the system and **cannot be mocked**:
 
 ## Technologies
 
-- .NET 9 / ASP.NET Core
+- .NET 10 / ASP.NET Core
 - Blazor Server (visual interface)
 - Newtonsoft.Json (JSONPath in response templating)
 - Swagger / Swashbuckle 10.x (API documentation)
